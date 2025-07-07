@@ -51,39 +51,6 @@ class ResidualBlock(nn.Module):
         
         return x + y
 
-class SelfAttention(nn.Module):
-    """Memory friendly self-attention used in high resolution stages."""
-
-    def __init__(self, channels, max_tokens=4096):
-        super(SelfAttention, self).__init__()
-        self.query = nn.Conv2d(channels, channels // 8, kernel_size=1)
-        self.key = nn.Conv2d(channels, channels // 8, kernel_size=1)
-        self.value = nn.Conv2d(channels, channels, kernel_size=1)
-        self.gamma = nn.Parameter(torch.zeros(1))
-        self.max_tokens = max_tokens
-
-    def forward(self, x):
-        b, c, h, w = x.size()
-        q = nn.functional.conv2d(x, self.query.weight.to(x.dtype), self.query.bias.to(x.dtype))
-        k = nn.functional.conv2d(x, self.key.weight.to(x.dtype), self.key.bias.to(x.dtype))
-        v = nn.functional.conv2d(x, self.value.weight.to(x.dtype), self.value.bias.to(x.dtype))
-
-        q = q.view(b, -1, h * w).permute(0, 2, 1)
-        k = k.view(b, -1, h * w)
-        v = v.view(b, -1, h * w)
-
-        if h * w > self.max_tokens:
-            # Downsample key and value when the spatial size is large to avoid
-            # forming a huge attention matrix.
-            s = int(math.sqrt(self.max_tokens))
-            k = k.view(b, -1, h, w)
-            v = v.view(b, -1, h, w)
-            k = nn.functional.adaptive_avg_pool2d(k, s).view(b, -1, s * s)
-            v = nn.functional.adaptive_avg_pool2d(v, s).view(b, -1, s * s)
-        attn = torch.bmm(q, k) / math.sqrt(k.shape[1])
-        attn = torch.softmax(attn, dim=-1)
-        out = torch.bmm(v, attn.permute(0, 2, 1)).view(b, c, h, w)
-        return self.gamma * out + x
     
 class UpsampleLayer(nn.Module):
     def __init__(self, InputChannels, OutputChannels, ResamplingFilter):
@@ -136,13 +103,22 @@ class DiscriminativeBasis(nn.Module):
         return self.LinearLayer(self.Basis(x).view(x.shape[0], -1))
     
 class GeneratorStage(nn.Module):
-    def __init__(self, InputChannels, OutputChannels, Cardinality, NumberOfBlocks, ExpansionFactor, KernelSize, VarianceScalingParameter, ResamplingFilter=None, DataType=torch.float32, use_attention=False):
+    def __init__(self, InputChannels, OutputChannels, Cardinality, NumberOfBlocks, ExpansionFactor, KernelSize, VarianceScalingParameter, ResamplingFilter=None, DataType=torch.float32):
         super(GeneratorStage, self).__init__()
         
         TransitionLayer = GenerativeBasis(InputChannels, OutputChannels) if ResamplingFilter is None else UpsampleLayer(InputChannels, OutputChannels, ResamplingFilter)
-        self.Layers = nn.ModuleList([TransitionLayer] + [ResidualBlock(OutputChannels, Cardinality, ExpansionFactor, KernelSize, VarianceScalingParameter) for _ in range(NumberOfBlocks)])
-        if use_attention:
-            self.Layers.append(SelfAttention(OutputChannels))
+        self.Layers = nn.ModuleList([
+            TransitionLayer
+        ] + [
+            ResidualBlock(
+                OutputChannels,
+                Cardinality,
+                ExpansionFactor,
+                KernelSize,
+                VarianceScalingParameter,
+            )
+            for _ in range(NumberOfBlocks)
+        ])
         self.DataType = DataType
         
     def forward(self, x):
@@ -154,13 +130,27 @@ class GeneratorStage(nn.Module):
         return x
     
 class DiscriminatorStage(nn.Module):
-    def __init__(self, InputChannels, OutputChannels, Cardinality, NumberOfBlocks, ExpansionFactor, KernelSize, VarianceScalingParameter, ResamplingFilter=None, DataType=torch.float32, use_attention=False):
+    def __init__(self, InputChannels, OutputChannels, Cardinality, NumberOfBlocks, ExpansionFactor, KernelSize, VarianceScalingParameter, ResamplingFilter=None, DataType=torch.float32):
         super(DiscriminatorStage, self).__init__()
         
-        TransitionLayer = DiscriminativeBasis(InputChannels, OutputChannels) if ResamplingFilter is None else DownsampleLayer(InputChannels, OutputChannels, ResamplingFilter)
-        self.Layers = nn.ModuleList([ResidualBlock(InputChannels, Cardinality, ExpansionFactor, KernelSize, VarianceScalingParameter) for _ in range(NumberOfBlocks)])
-        if use_attention:
-            self.Layers.append(SelfAttention(InputChannels))
+
+        TransitionLayer = (
+            DiscriminativeBasis(InputChannels, OutputChannels)
+            if ResamplingFilter is None
+            else DownsampleLayer(InputChannels, OutputChannels, ResamplingFilter)
+        )
+        self.Layers = nn.ModuleList(
+            [
+                ResidualBlock(
+                    InputChannels,
+                    Cardinality,
+                    ExpansionFactor,
+                    KernelSize,
+                    VarianceScalingParameter,
+                )
+                for _ in range(NumberOfBlocks)
+            ]
+        )
         self.Layers.append(TransitionLayer)
         self.DataType = DataType
         
@@ -177,8 +167,30 @@ class Generator(nn.Module):
         super(Generator, self).__init__()
         
         VarianceScalingParameter = sum(BlocksPerStage)
-        MainLayers = [GeneratorStage(NoiseDimension + ConditionEmbeddingDimension, WidthPerStage[0], CardinalityPerStage[0], BlocksPerStage[0], ExpansionFactor, KernelSize, VarianceScalingParameter, use_attention=True)]
-        MainLayers += [GeneratorStage(WidthPerStage[x], WidthPerStage[x + 1], CardinalityPerStage[x + 1], BlocksPerStage[x + 1], ExpansionFactor, KernelSize, VarianceScalingParameter, ResamplingFilter, use_attention=True) for x in range(len(WidthPerStage) - 1)]
+        MainLayers = [
+            GeneratorStage(
+                NoiseDimension + ConditionEmbeddingDimension,
+                WidthPerStage[0],
+                CardinalityPerStage[0],
+                BlocksPerStage[0],
+                ExpansionFactor,
+                KernelSize,
+                VarianceScalingParameter,
+            )
+        ]
+        MainLayers += [
+            GeneratorStage(
+                WidthPerStage[x],
+                WidthPerStage[x + 1],
+                CardinalityPerStage[x + 1],
+                BlocksPerStage[x + 1],
+                ExpansionFactor,
+                KernelSize,
+                VarianceScalingParameter,
+                ResamplingFilter,
+            )
+            for x in range(len(WidthPerStage) - 1)
+        ]
         
         self.MainLayers = nn.ModuleList(MainLayers)
         out_ch = WidthPerStage[-1]
@@ -218,7 +230,6 @@ class Discriminator(nn.Module):
                 KernelSize,
                 VarianceScalingParameter,
                 ResamplingFilter,
-                use_attention=True,
             )
             for x in range(len(WidthPerStage) - 1)
         ]
@@ -237,7 +248,6 @@ class Discriminator(nn.Module):
                 ExpansionFactor,
                 KernelSize,
                 VarianceScalingParameter,
-                use_attention=True,
             )
         ]
         
