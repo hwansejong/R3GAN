@@ -6,8 +6,14 @@ from .FusedOperators import BiasedActivation
 from training.graph_utils import COLOR_MAP
 
 def MSRInitializer(Layer, ActivationGain=1):
+    # Skip initialization for empty tensors.
+    if Layer.weight.data.numel() == 0:
+        if Layer.bias is not None:
+            Layer.bias.data.zero_()
+        return Layer
+        
     FanIn = Layer.weight.data.size(1) * Layer.weight.data[0][0].numel()
-    Layer.weight.data.normal_(0,  ActivationGain / math.sqrt(FanIn))
+    Layer.weight.data.normal_(0, ActivationGain / math.sqrt(FanIn))
 
     if Layer.bias is not None:
         Layer.bias.data.zero_()
@@ -186,8 +192,38 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
         
         VarianceScalingParameter = sum(BlocksPerStage)
-        MainLayers = [DiscriminatorStage(WidthPerStage[x], WidthPerStage[x + 1], CardinalityPerStage[x], BlocksPerStage[x], ExpansionFactor, KernelSize, VarianceScalingParameter, ResamplingFilter, use_attention=True) for x in range(len(WidthPerStage) - 1)]
-        MainLayers += [DiscriminatorStage(WidthPerStage[-1], 1 if ConditionDimension is None else ConditionEmbeddingDimension, CardinalityPerStage[-1], BlocksPerStage[-1], ExpansionFactor, KernelSize, VarianceScalingParameter, use_attention=True)]
+        MainLayers = [
+            DiscriminatorStage(
+                WidthPerStage[x],
+                WidthPerStage[x + 1],
+                CardinalityPerStage[x],
+                BlocksPerStage[x],
+                ExpansionFactor,
+                KernelSize,
+                VarianceScalingParameter,
+                ResamplingFilter,
+                use_attention=True,
+            )
+            for x in range(len(WidthPerStage) - 1)
+        ]
+
+        final_channels = (
+            1
+            if ConditionDimension is None or ConditionEmbeddingDimension <= 0
+            else ConditionEmbeddingDimension
+        )
+        MainLayers += [
+            DiscriminatorStage(
+                WidthPerStage[-1],
+                final_channels,
+                CardinalityPerStage[-1],
+                BlocksPerStage[-1],
+                ExpansionFactor,
+                KernelSize,
+                VarianceScalingParameter,
+                use_attention=True,
+            )
+        ]
         
         self.ExtractionLayer = Convolution(3, WidthPerStage[0], KernelSize=1)
         self.MainLayers = nn.ModuleList(MainLayers)
