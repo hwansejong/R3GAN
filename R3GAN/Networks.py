@@ -61,11 +61,11 @@ class SelfAttention(nn.Module):
 
     def forward(self, x):
         b, c, h, w = x.size()
-        q = self.query(x).view(b, -1, h * w).permute(0, 2, 1)
-        k = self.key(x).view(b, -1, h * w)
+        q = nn.functional.conv2d(x, self.query.weight.to(x.dtype), self.query.bias.to(x.dtype)).view(b, -1, h * w).permute(0, 2, 1)
+        k = nn.functional.conv2d(x, self.key.weight.to(x.dtype), self.key.bias.to(x.dtype)).view(b, -1, h * w)
         attn = torch.bmm(q, k) / math.sqrt(k.shape[1])
         attn = torch.softmax(attn, dim=-1)
-        v = self.value(x).view(b, -1, h * w)
+        v = nn.functional.conv2d(x, self.value.weight.to(x.dtype), self.value.bias.to(x.dtype)).view(b, -1, h * w)
         out = torch.bmm(v, attn.permute(0, 2, 1)).view(b, c, h, w)
         return self.gamma * out + x
     
