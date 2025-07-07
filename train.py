@@ -18,12 +18,6 @@ from training import training_loop
 from metrics import metric_main
 from torch_utils import training_stats
 from torch_utils import custom_ops
-
-# Configure PyTorch CUDA memory allocation to avoid fragmentation in large
-# training runs.
-os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:true")
-
-
 # ----------------------------------------------------------------------------
 
 
