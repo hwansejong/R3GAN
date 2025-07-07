@@ -9,7 +9,11 @@ class FloorplanGraphDataset(ImageFolderDataset):
         sample = super()._load_raw_image(self._raw_idx[0])
         feats = extract_graph_features(sample.transpose(1, 2, 0))
         self._label_shape = [len(feats)]
-        self._graph_features = [extract_graph_features(super()._load_raw_image(i).transpose(1,2,0)) for i in range(self._raw_shape[0])]
+        load_raw_image = super()._load_raw_image
+        self._graph_features = [
+            extract_graph_features(load_raw_image(i).transpose(1, 2, 0))
+            for i in range(self._raw_shape[0])
+        ]
 
     def __getitem__(self, idx):
         img = self._load_raw_image(self._raw_idx[idx])
