@@ -88,7 +88,7 @@ def launch_training(c, desc, outdir, dry_run):
     print(f"Dataset path:        {c.training_set_kwargs.path}")
     print(f"Dataset size:        {c.training_set_kwargs.max_size} images")
     print(f"Dataset resolution:  {c.training_set_kwargs.resolution}")
-    print(f"Dataset labels:      {c.training_set_kwargs.use_labels}")
+    print(f"Dataset labels:      {c.training_set_kwargs.get('use_labels', False)}")
     print(f"Dataset x-flips:     {c.training_set_kwargs.xflip}")
     print()
 
@@ -123,16 +123,15 @@ def init_dataset_kwargs(data, cond):
         dataset_kwargs = dnnlib.EasyDict(
             class_name="training.dataset.ImageFolderDataset" if cond else "training.FloorplanGraphDataset",
             path=data,
-            use_labels=True,
             max_size=None,
             xflip=False,
         )
+        if cond:
+            dataset_kwargs.use_labels = True
         dataset_obj = dnnlib.util.construct_class_by_name(
             **dataset_kwargs
         )  # Subclass of training.dataset.Dataset.
-        dataset_kwargs.resolution = (
-            dataset_obj.resolution
-        )  # Be explicit about resolution.
+        dataset_kwargs.resolution = dataset_obj.resolution  # Be explicit about resolution.
         dataset_kwargs.use_labels = dataset_obj.has_labels  # Be explicit about labels.
         dataset_kwargs.max_size = len(dataset_obj)  # Be explicit about dataset size.
         return dataset_kwargs, dataset_obj.name
@@ -307,7 +306,11 @@ def main(**kwargs):
         raise click.ClickException(
             "--cond=True requires labels specified in dataset.json"
         )
-    c.training_set_kwargs.use_labels = opts.cond
+    if opts.cond:
+        c.training_set_kwargs.use_labels = True
+    else:
+        if "use_labels" in c.training_set_kwargs:
+            del c.training_set_kwargs["use_labels"]
     c.training_set_kwargs.xflip = opts.mirror
 
     # Hyperparameters & settings.
