@@ -60,6 +60,7 @@ class SelfAttention(nn.Module):
         self.key = nn.Conv2d(channels, channels // 8, kernel_size=1)
         self.value = nn.Conv2d(channels, channels, kernel_size=1)
         self.gamma = nn.Parameter(torch.zeros(1))
+        self.max_tokens = max_tokens
 
     def forward(self, x):
         b, c, h, w = x.size()
