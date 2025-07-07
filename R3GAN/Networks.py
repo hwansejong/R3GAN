@@ -164,8 +164,10 @@ class Generator(nn.Module):
         self.SpaceBranch = Convolution(out_ch, 10, KernelSize=1)
         self.OpenBranch = Convolution(out_ch, 2, KernelSize=1)
         
-        if ConditionDimension is not None:
-            self.EmbeddingLayer = MSRInitializer(nn.Linear(ConditionDimension, ConditionEmbeddingDimension, bias=False))
+        if ConditionDimension is not None and ConditionEmbeddingDimension > 0:
+            self.EmbeddingLayer = MSRInitializer(
+                nn.Linear(ConditionDimension, ConditionEmbeddingDimension, bias=False)
+            )
         
     def forward(self, x, y=None):
         x = torch.cat([x, self.EmbeddingLayer(y)], dim=1) if hasattr(self, 'EmbeddingLayer') else x
@@ -190,8 +192,11 @@ class Discriminator(nn.Module):
         self.ExtractionLayer = Convolution(3, WidthPerStage[0], KernelSize=1)
         self.MainLayers = nn.ModuleList(MainLayers)
         
-        if ConditionDimension is not None:
-            self.EmbeddingLayer = MSRInitializer(nn.Linear(ConditionDimension, ConditionEmbeddingDimension, bias=False), ActivationGain=1 / math.sqrt(ConditionEmbeddingDimension))
+        if ConditionDimension is not None and ConditionEmbeddingDimension > 0:
+            self.EmbeddingLayer = MSRInitializer(
+                nn.Linear(ConditionDimension, ConditionEmbeddingDimension, bias=False),
+                ActivationGain=1 / math.sqrt(ConditionEmbeddingDimension),
+            )
         
     def forward(self, x, y=None):
         x = self.ExtractionLayer(x.to(self.MainLayers[0].DataType))
