@@ -43,13 +43,15 @@ def parse_range(s: Union[str, List]) -> List[int]:
 @click.command()
 @click.option('--network', 'network_pkl', help='Network pickle filename', required=True)
 @click.option('--seeds', type=parse_range, help='List of random seeds (e.g., \'0,1,4-6\')', required=True)
-@click.option('--class', 'class_idx', type=int, help='Class label (unconditional if not specified)')
+@click.option('--class', 'class_idx', type=int, help='Class label (for label-conditioned networks)')
+@click.option('--graph', 'graph_features', type=str, help='Path to graph feature .npy file')
 @click.option('--outdir', help='Where to save the output images', type=str, required=True, metavar='DIR')
 def generate_images(
     network_pkl: str,
     seeds: List[int],
     outdir: str,
-    class_idx: Optional[int]
+    class_idx: Optional[int],
+    graph_features: Optional[str]
 ):
     print('Loading networks from "%s"...' % network_pkl)
     device = torch.device('cuda')
@@ -61,12 +63,20 @@ def generate_images(
     # Labels.
     label = torch.zeros([1, G.c_dim], device=device)
     if G.c_dim != 0:
-        if class_idx is None:
-            raise click.ClickException('Must specify class label with --class when using a conditional network')
-        label[:, class_idx] = 1
+        if graph_features is not None:
+            feats = np.load(graph_features)
+            if feats.ndim == 1:
+                feats = feats.reshape(1, -1)
+            if feats.shape[1] != G.c_dim:
+                raise click.ClickException('Graph feature dimension mismatch')
+            label = torch.from_numpy(feats).to(device).float()
+        elif class_idx is not None:
+            label[:, class_idx] = 1
+        else:
+            raise click.ClickException('Must specify --graph or --class for a conditional network')
     else:
-        if class_idx is not None:
-            print ('warn: --class=lbl ignored when running on an unconditional network')
+        if class_idx is not None or graph_features is not None:
+            print('warn: conditional inputs ignored when running on an unconditional network')
 
     # Generate images.
     for seed_idx, seed in enumerate(seeds):
