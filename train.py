@@ -118,10 +118,10 @@ def launch_training(c, desc, outdir, dry_run):
 # ----------------------------------------------------------------------------
 
 
-def init_dataset_kwargs(data):
+def init_dataset_kwargs(data, cond):
     try:
         dataset_kwargs = dnnlib.EasyDict(
-            class_name="training.dataset.ImageFolderDataset",
+            class_name="training.dataset.ImageFolderDataset" if cond else "training.FloorplanGraphDataset",
             path=data,
             use_labels=True,
             max_size=None,
@@ -182,7 +182,7 @@ def parse_comma_separated_list(s):
 # Optional features.
 @click.option(
     "--cond",
-    help="Train conditional model",
+    help="Use dataset labels when set to 1, graph features when 0",
     metavar="BOOL",
     type=bool,
     default=False,
@@ -302,7 +302,7 @@ def main(**kwargs):
     c.data_loader_kwargs = dnnlib.EasyDict(pin_memory=True, prefetch_factor=2)
 
     # Training set.
-    c.training_set_kwargs, dataset_name = init_dataset_kwargs(data=opts.data)
+    c.training_set_kwargs, dataset_name = init_dataset_kwargs(data=opts.data, cond=opts.cond)
     if opts.cond and not c.training_set_kwargs.use_labels:
         raise click.ClickException(
             "--cond=True requires labels specified in dataset.json"
