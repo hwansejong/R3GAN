@@ -52,7 +52,9 @@ class ResidualBlock(nn.Module):
         return x + y
 
 class SelfAttention(nn.Module):
-    def __init__(self, channels):
+    """Memory friendly self-attention used in high resolution stages."""
+
+    def __init__(self, channels, max_tokens=4096):
         super(SelfAttention, self).__init__()
         self.query = nn.Conv2d(channels, channels // 8, kernel_size=1)
         self.key = nn.Conv2d(channels, channels // 8, kernel_size=1)
@@ -61,11 +63,24 @@ class SelfAttention(nn.Module):
 
     def forward(self, x):
         b, c, h, w = x.size()
-        q = nn.functional.conv2d(x, self.query.weight.to(x.dtype), self.query.bias.to(x.dtype)).view(b, -1, h * w).permute(0, 2, 1)
-        k = nn.functional.conv2d(x, self.key.weight.to(x.dtype), self.key.bias.to(x.dtype)).view(b, -1, h * w)
+        q = nn.functional.conv2d(x, self.query.weight.to(x.dtype), self.query.bias.to(x.dtype))
+        k = nn.functional.conv2d(x, self.key.weight.to(x.dtype), self.key.bias.to(x.dtype))
+        v = nn.functional.conv2d(x, self.value.weight.to(x.dtype), self.value.bias.to(x.dtype))
+
+        q = q.view(b, -1, h * w).permute(0, 2, 1)
+        k = k.view(b, -1, h * w)
+        v = v.view(b, -1, h * w)
+
+        if h * w > self.max_tokens:
+            # Downsample key and value when the spatial size is large to avoid
+            # forming a huge attention matrix.
+            s = int(math.sqrt(self.max_tokens))
+            k = k.view(b, -1, h, w)
+            v = v.view(b, -1, h, w)
+            k = nn.functional.adaptive_avg_pool2d(k, s).view(b, -1, s * s)
+            v = nn.functional.adaptive_avg_pool2d(v, s).view(b, -1, s * s)
         attn = torch.bmm(q, k) / math.sqrt(k.shape[1])
         attn = torch.softmax(attn, dim=-1)
-        v = nn.functional.conv2d(x, self.value.weight.to(x.dtype), self.value.bias.to(x.dtype)).view(b, -1, h * w)
         out = torch.bmm(v, attn.permute(0, 2, 1)).view(b, c, h, w)
         return self.gamma * out + x
     
